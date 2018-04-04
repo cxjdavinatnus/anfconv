@@ -1,3 +1,5 @@
+Copyright Security Research Labs GMBH
+
 ANF-to-CNF converter. It takes as input a file containing an ANF like:
 
 ------------
