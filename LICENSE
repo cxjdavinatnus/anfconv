@@ -1,0 +1,12 @@
+* anfconv is MIT licensed software.
+  Copyright Security Research Labs 2014.
+  Please read MIT-LICENSE.txt
+
+* Espresso is MIT-licensed software.
+  Please read MIT-LICENSE.txt
+
+* We link against PolyBori which is GPL licensed, making everything GPLv licensed
+  Please read GPLv2-LICENSE.txt
+
+* We link against M4RI which is GPL licensed, making everything GPLv2 licensed
+  Please read GPLv2-LICENSE.txt

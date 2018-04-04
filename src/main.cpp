@@ -1,0 +1,498 @@
+/*****************************************************************************
+anfconv
+Copyright (C) 2016  Security Research Labs
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+***********************************************/
+
+#include <boost/program_options.hpp>
+namespace po = boost::program_options;
+
+#include "anf.h"
+#include "cnf.h"
+#include "xlsimplifier.h"
+#include <fstream>
+#include <sys/wait.h>
+#include "time_mem.h"
+#include <fstream>
+#include "satsolve.h"
+#include "simplifybysat.h"
+#include "replacer.h"
+#include "GitSHA1.h"
+#include <boost/scoped_ptr.hpp>
+#include <memory>
+#include <deque>
+using std::unique_ptr;
+
+//#define DEBUG_EXTRACTION
+using std::cout;
+using std::cerr;
+using std::endl;
+using std::string;
+using std::deque;
+
+vector<string> filesToRead;
+string fileToWriteANF;
+string fileToWriteCNF;
+string programName;
+
+//Writing options
+bool writeANF;
+bool writeCNF;
+
+//Solving options
+bool doSolveSAT; //Solve using CryptoMiniSat
+
+//Dependency
+int renumber_ring_vars;
+
+//How to simplify
+bool doXLSimplify;
+int doANFSimplify = 1; //NOTE: Things WILL break if this is not enabled
+bool doSATSimplify;
+
+//Parameters
+ConfigData config;
+uint64_t numConfl;
+vector<string> extractString;
+
+void parseOptions(int argc, char *argv[])
+{
+    // Declare the supported options.
+    po::options_description generalOptions("Allowed options");
+    generalOptions.add_options()
+    ("help,h", "produce help message")
+    ("version", "print version number and exit")
+    ("read,r", po::value(&filesToRead)
+        , "Read ANF from this file")
+    ("anfwrite,a", po::value(&fileToWriteANF)
+        , "Write ANF output to file")
+    ("cnfwrite,c", po::value(&fileToWriteCNF)
+        , "Write CNF output to file")
+    ("solvesat,s", po::bool_switch(&doSolveSAT)
+        , "Solve with SAT solver")
+    ("printdeg", po::value(&config.max_degree_poly_to_print)->default_value(-1)
+        , "Print only final polynomials of degree lower or equal to this. -1 means print all")
+    ("karn", po::value(&config.useKarn)->default_value(config.useKarn)
+        , "Use Karnaugh table minimisation")
+    ("program,p", po::value(&programName)->default_value("/usr/local/bin/cryptominisat")
+        , "SAT solver to use with full path")
+    ("verbosity,v", po::value(&config.verbosity)->default_value(1)
+        , "Verbosity setting (0 = silent)")
+    ("dump,d", po::bool_switch(&config.writePNG)
+         , "Dump XL's and linearization's matrixes as PNG files")
+    ("anfsimp", po::value(&doANFSimplify)->default_value(1)
+        , "Simply ANF before doing anything")
+    ("satsimp", po::bool_switch(&doSATSimplify)
+        , "Simplify using SAT")
+    ("xlsimp", po::bool_switch(&doXLSimplify)
+        , "Simplify using XL")
+    ("confl", po::value<uint64_t>(&numConfl)->default_value(20000)
+        , "Conflict limit for built-in SAT solver")
+    ("cutnum", po::value(&config.cutNum)->default_value(config.cutNum)
+        , "Cutting number when not using XOR clauses")
+    ("extract,e", po::value(&extractString)->multitoken()
+        , "Extract the values of these variables as binary string from final ANF. \
+             Must be like '10-20' for extracting x10...x20")
+    ("revar", po::value(&renumber_ring_vars)->default_value(0)
+        , "Minimise (renumber) ANF before attempting dependency calculation. Reduces ring size")
+
+    ;
+
+    po::positional_options_description p;
+    p.add("read", -1);
+
+    po::variables_map vm;
+    po::options_description cmdline_options;
+    cmdline_options
+    .add(generalOptions)
+    ;
+
+    try {
+        po::store(
+            po::command_line_parser(argc, argv)
+            .options(cmdline_options)
+            .positional(p).run()
+            , vm
+        );
+
+        if (vm.count("help"))
+        {
+            cout << generalOptions << endl;
+            exit(0);
+        }
+
+        po::notify(vm);
+    } catch (boost::exception_detail::clone_impl<
+        boost::exception_detail::error_info_injector<po::unknown_option> >& c
+    ) {
+        cout << "Some option you gave was wrong. Please give '--help' to get help" << endl;
+        cout << "Unkown option: " << c.what() << endl;
+        exit(-1);
+    } catch (boost::bad_any_cast &e) {
+        cerr << e.what() << endl;
+        exit(-1);
+    } catch (boost::exception_detail::clone_impl<
+        boost::exception_detail::error_info_injector<po::invalid_option_value> > what
+    ) {
+        cerr
+        << "Invalid value '" << what.what() << "'"
+        << " given to option '" << what.get_option_name() << "'"
+        << endl;
+
+        exit(-1);
+    } catch (boost::exception_detail::clone_impl<
+        boost::exception_detail::error_info_injector<po::multiple_occurrences> > what
+    ) {
+        cerr
+        << "Error: " << what.what() << " of option '"
+        << what.get_option_name() << "'"
+        << endl;
+
+        exit(-1);
+    } catch (boost::exception_detail::clone_impl<
+        boost::exception_detail::error_info_injector<po::required_option> > what
+    ) {
+        cerr
+        << "You forgot to give a required option '"
+        << what.get_option_name() << "'"
+        << endl;
+
+        exit(-1);
+    }
+
+    if (vm.count("version")) {
+        cout << "anfconv " << get_git_version() << endl;
+        exit(0);
+    }
+
+    //Writing methods
+    if (vm.count("anfwrite")) {
+        writeANF = true;
+    }
+    if (vm.count("cnfwrite")) {
+        writeCNF = true;
+    }
+
+
+    if (config.cutNum < 3 || config.cutNum > 10) {
+        cout
+        << "ERROR! For sanity, cutting number must be between 3 and 10"
+        << endl;
+
+        exit(-1);
+    }
+
+    if (!vm.count("read")) {
+        cout
+        << "You must give an ANF file to read in"
+        << endl;
+
+        exit(-1);
+    }
+}
+
+std::pair<uint32_t, uint32_t> get_var_range(const string& extractString, uint32_t max_var)
+{
+    const size_t pos = extractString.find("-");
+    if (pos == string::npos) {
+        std::cerr
+        << "ERROR: you gave a variable range but your string doesn't contain '-'"
+        << endl;
+        exit(-1);
+    }
+
+    //Extract TO and FROM
+    int from;
+    int to;
+    try {
+        from = boost::lexical_cast<int>(extractString.substr(0,pos));
+        assert(extractString[pos] == '-');
+        to = boost::lexical_cast<int>(extractString.substr(pos+1,extractString.size()-pos-1));
+    } catch (boost::bad_lexical_cast& b) {
+        cout
+        << "ERROR: either TO or FROM given to --extract couldn't be converted to integer: "
+        << endl
+        << b.what()
+        << " -- maybe not an integer?"
+        << endl;
+
+        exit(-1);
+    }
+
+    //User feedback
+    cout
+    << "Extracting values "
+    << from << " - " << to
+    << endl;
+
+    //Sanity checks
+    if (from < 0 || to < 0)  {
+        std::cerr
+        << "ERROR: During extraction, the FROM or the TO parameter is smaller than 0"
+        << endl;
+        exit(-1);
+    }
+
+    if (to < from) {
+        std::cerr
+        << "ERROR: During extraction, you gave the FROM value to be larger than the TO value"
+        << endl;
+        exit(-1);
+    }
+
+    if (max_var < (size_t)to) {
+        std::cerr
+        << "ERROR: During extraction, the TO you gave is higher than the number of variables in the ANF"
+        << "( " << max_var << ")"
+        << endl;
+        exit(-1);
+    }
+
+    return std::make_pair(from, to);
+}
+
+uint32_t get_var(const string var_num, const uint32_t max_var)
+{
+    uint32_t var = boost::lexical_cast<int>(var_num);
+    assert(var < max_var);
+    return var;
+}
+
+size_t get_ringsize(const string anf_filename)
+{
+    unique_ptr<BoolePolyRing> ring(new BoolePolyRing(1));
+    unique_ptr<ANF> anf(new ANF(ring.get(), config));
+    const size_t ring_size = anf->readFile(anf_filename, false);
+    cout << "--> Needed ring size is " << ring_size+1 << endl;
+
+    return ring_size;
+}
+
+void simplify(ANF* anf, const ANF& orig_anf)
+{
+    if (config.verbosity>=1) {
+        cout << "Simple simplifying of ANF..." << std::flush;
+    }
+
+    bool changed = true;
+    uint32_t numIters = 0;
+    double myTime = cpuTime();
+    while (true) {
+        uint64_t prev_set_vars = anf->getNumSetVars();
+        uint64_t prev_eq_num = anf->size();
+        uint64_t prev_monom_in_eq = anf->numMonoms();
+        uint64_t prev_deg = anf->deg();
+        uint64_t prev_simp_xors = anf->getNumSimpleXors();
+        uint64_t prev_replaced_vars = anf->getNumReplacedVars();
+
+        if (doANFSimplify) {
+            anf->simplify(config.anfReplaceVars, true);
+            //anf->simplify(config.anfReplaceVars, true);
+
+            if (config.verbosity>=1) {
+                cout
+                << "c Done." << endl;
+                if (config.verbosity >= 1) {
+                    cout<< "c Time to read&simplify ANF: "
+                    << std::fixed << std::setprecision(2) << (cpuTime() - myTime)
+                    << endl
+                    << "New stats:" << endl;
+                    anf->printStats(config.verbosity);
+                }
+            }
+        }
+
+        uint64_t set_vars = anf->getNumSetVars();
+        uint64_t eq_num = anf->size();
+        uint64_t monom_in_eq = anf->numMonoms();
+        uint64_t deg = anf->deg();
+        uint64_t simp_xors = anf->getNumSimpleXors();
+        uint64_t replaced_vars = anf->getNumReplacedVars();
+
+        if (set_vars == prev_set_vars &&
+            eq_num == prev_eq_num &&
+            monom_in_eq == prev_monom_in_eq &&
+            deg == prev_deg &&
+            simp_xors == prev_simp_xors &&
+            replaced_vars == prev_replaced_vars
+        ) {
+            break;
+        }
+
+        if (doSATSimplify) {
+            cout << "c Simplifying using SAT solver" << endl;
+            SimplifyBySat simpsat(*anf, orig_anf, config, numConfl);
+            simpsat.simplify();
+            changed = true;
+            cout << "c Done simplifying with SAT solver." << endl;
+        }
+
+        //XL simplification
+        if (doXLSimplify) {
+            XLSimplifier xl(*anf, 2);
+            xl.simplify(*anf, numIters, config);
+            cout << "Simplifying ANF with XL..." << std::flush;
+            changed |= xl.simplify(*anf, numIters, config);
+            cout << "Done." << endl;
+        }
+        numIters++;
+    }
+}
+
+void write_anf(ANF* anf)
+{
+    std::ofstream ofs;
+    ofs.open(fileToWriteANF.c_str());
+    if (!ofs) {
+        std::cerr
+        << "Error opening file \"" << fileToWriteANF << "\" for writing"
+        << endl;
+        exit(-1);
+    }
+
+    ANF* newanf = NULL;
+    if (renumber_ring_vars) {
+        anf->preferLowVars();
+        vector<uint32_t> oldToNew;
+        vector<uint32_t> newToOld;
+         newanf = anf->minimise(oldToNew, newToOld);
+    } else {
+        newanf = anf;
+    }
+
+    //Write to file
+    ofs << *newanf << endl;
+
+    if (renumber_ring_vars) {
+        delete newanf;
+    }
+}
+
+void solve_by_sat(const ANF* anf, const ANF& orig_anf)
+{
+    double myTime = cpuTime();
+
+    CNF cnf(*anf, config);
+    cnf.init();
+    cnf.addAllEquations();
+
+    cout << "c ---- CNF stats -----" << endl;
+    cout << "c CNF conversion time  : " << (cpuTime() - myTime) << endl;
+    cnf.print_stats();
+
+    if (writeCNF) {
+        std::ofstream ofs;
+        ofs.open(fileToWriteCNF.c_str());
+        if (!ofs) {
+            cout << "Error opening file \""
+            << fileToWriteCNF
+            << "\" for writing" << endl;
+            exit(-1);
+        }
+        ofs << cnf << endl;
+        ofs.close();
+    }
+
+    if (doSolveSAT) {
+        SATSolve solver(config.verbosity, programName);
+        vector<lbool> sol = solver.solveCNF(orig_anf, *anf, cnf);
+
+        if (config.verbosity >= 1) {
+            cout << "c CPU time unknown " << endl;
+        }
+
+        if (!sol.empty()) {
+            for(const string str :extractString) {
+                std::pair<uint32_t, uint32_t> range = get_var_range(str, orig_anf.getRing().nVariables());
+                anf->extractVariables(range.first, range.second, &sol);
+            }
+        }
+    }
+}
+
+void perform_all_operations_for_file(
+    const string anf_filename
+    , BoolePolyRing* ring
+) {
+    ANF* anf = new ANF(ring, config);
+    const size_t ring_size2 = anf->readFile(anf_filename, true);
+
+    if (ring->nVariables() != ring_size2+1) {
+        cout << "ring->nVariables(): " << ring->nVariables()
+        << ", newly computed ring size: " << ring_size2 << endl;
+    }
+    assert(ring->nVariables() == ring_size2+1);
+
+    if (config.verbosity >= 1) {
+        anf->printStats(config.verbosity);
+    }
+
+    //Simplification(s), recursively
+    ANF orig_anf(*anf);
+    if (doANFSimplify || doSATSimplify|| doXLSimplify) {
+        simplify(anf, orig_anf);
+    }
+
+    //Writing simplified ANF
+    if (writeANF) {
+        write_anf(anf);
+    }
+
+    //We need to extract data
+    if (!extractString.empty()) {
+        if (!anf->getOK()) {
+            //If UNSAT, there is no solution to extract
+            cout << "UNSAT, so no solution to extract" << endl;
+        } else {
+            //Go through each piece of data that needs extraction
+            for(const string str: extractString) {
+                std::pair<uint32_t, uint32_t> range = get_var_range(str, orig_anf.getRing().nVariables());
+                anf->extractVariables(range.first, range.second);
+            }
+        }
+    }
+
+    //CNF conversion and solving
+    if (doSolveSAT || writeCNF) {
+        solve_by_sat(anf, orig_anf);
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    parseOptions(argc, argv);
+    //test();
+
+    if (filesToRead.empty()) {
+        cerr << "ERROR: you must provide file(s) to read" << endl;
+    }
+
+    const size_t ring_size = get_ringsize(filesToRead[0]);
+    BoolePolyRing* ring = new BoolePolyRing(ring_size+1);
+
+    vector<vector<BoolePolynomial> > polys_for_file;
+    for(size_t i = 0; i < filesToRead.size(); i++) {
+        perform_all_operations_for_file(filesToRead[i], ring);
+    }
+    cout << endl;
+
+    return 0;
+}
+
