@@ -136,79 +136,59 @@ class ANF
         friend std::ostream& operator<<(std::ostream& os, const ANF& anf);
 };
 
-inline size_t ANF::size() const
-{
+inline size_t ANF::size() const {
     return eqs.size();
 }
 
-inline BoolePolyRing& ANF::getRing()
-{
+inline BoolePolyRing& ANF::getRing() {
     return *ring;
 }
 
-inline const BoolePolyRing& ANF::getRing() const
-{
+inline const BoolePolyRing& ANF::getRing() const {
     return *ring;
 }
 
-inline size_t ANF::numMonoms() const
-{
+inline size_t ANF::numMonoms() const {
     size_t num = 0;
-    for(vector<BoolePolynomial>::const_iterator it = eqs.begin(), end = eqs.end(); it != end; it++) {
-        num += it->length();
+    for(const BoolePolynomial& poly : eqs) {
+        num += poly.length();
     }
     return num;
 }
 
-inline size_t ANF::deg() const
-{
+inline size_t ANF::deg() const {
     int deg = 0;
-    for(vector<BoolePolynomial>::const_iterator it = eqs.begin(), end = eqs.end(); it != end; it++) {
-        deg = std::max(deg, it->deg());
+    for(const BoolePolynomial& poly : eqs) {
+        deg = std::max(deg, poly.deg());
     }
     return deg;
 }
 
-inline const vector<BoolePolynomial>& ANF::getEqs() const
-{
+inline const vector<BoolePolynomial>& ANF::getEqs() const {
     return eqs;
 }
 
-inline size_t ANF::getNumSimpleXors() const
-{
+inline size_t ANF::getNumSimpleXors() const {
     size_t num = 0;
-    for(vector<BoolePolynomial>::const_iterator it = eqs.begin(), end = eqs.end(); it != end; it++) {
-        num += (it->deg() == 1);
+    for(const BoolePolynomial& poly : eqs) {
+        num += (poly.deg() == 1);
     }
-
     return num;
 }
 
-inline const vector<vector<size_t> >& ANF::getOccur() const
-{
+inline const vector<vector<size_t> >& ANF::getOccur() const {
     return occur;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const ANF& anf)
-{
+inline std::ostream& operator<<(std::ostream& os, const ANF& anf) {
     //Dump comments
-    for(vector<string>::const_iterator
-        it = anf.comments.begin(), end = anf.comments.end()
-        ; it != end
-        ; it++
-    ) {
-        os << *it << endl;
+    for(const string& comment : anf.comments) {
+        os << comment << endl;
     }
 
     //print equations
-    size_t i = 0;
-    for (vector<BoolePolynomial>::const_iterator
-            it = anf.eqs.begin(), end = anf.eqs.end()
-            ; it != end
-            ; it++, i++
-        ) {
-
-        os << *it;
+    for (const BoolePolynomial& poly : anf.eqs) {
+        os << poly;
         os << endl;
     }
 
