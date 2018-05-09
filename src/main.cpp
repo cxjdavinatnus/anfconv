@@ -26,6 +26,7 @@ namespace po = boost::program_options;
 
 #include "anf.h"
 #include "cnf.h"
+#include "gaussjordan.h"
 #include "xlsimplifier.h"
 #include <fstream>
 #include <sys/wait.h>
@@ -333,6 +334,9 @@ void simplify(ANF* anf, const ANF& orig_anf)
             cout << "Simplifying ANF with XL..." << std::flush;
             changed |= xl.simplify(*anf, numIters, config);
             cout << "Done." << endl;
+
+            //GaussJordan gj(*anf, config);
+            //gj.run(*anf);
         }
         anf->propagate();
 
