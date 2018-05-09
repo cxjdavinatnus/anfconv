@@ -57,12 +57,8 @@ ANF::~ANF()
 bool ANF::isSolved() const
 {
     //Evaluate each and every polynomial and check if it's all satisfied
-    for(vector<BoolePolynomial>::const_iterator
-        it = eqs.begin(), end = eqs.end()
-        ; it != end
-        ; it++
-    ) {
-        lbool ret = evaluatePoly(*it, replacer->getValues());
+    for(const BoolePolynomial& poly : eqs) {
+        lbool ret = evaluatePoly(poly, replacer->getValues());
         if (ret == l_False || ret == l_Undef)
             return false;
     }
@@ -320,27 +316,18 @@ void ANF::addBoolePolynomial(const BoolePolynomial& poly)
 void ANF::add_poly_to_occur(const BoolePolynomial& poly, const size_t index)
 {
     BooleMonomial m = poly.usedVariables();
-    for(BooleMonomial::const_iterator
-        it = m.begin(), end = m.end()
-        ; it != end
-        ; it++
-    ) {
-        occur[*it].push_back(index);
+    for(const uint32_t& var_idx : m) {
+        occur[var_idx].push_back(index);
     }
 }
 
 void ANF::remove_poly_from_occur(const BoolePolynomial& poly, size_t index)
 {
     //Remove from occur
-    BooleMonomial vars(poly.usedVariables());
-    for(BooleMonomial::const_iterator
-        it = vars.begin(), end = vars.end()
-        ; it != end
-        ; it++
-    ) {
-        vector<size_t>::iterator findIt = std::find(occur[*it].begin(), occur[*it].end(), index);
-        assert(findIt != occur[*it].end());
-        occur[*it].erase(findIt);
+    for(const uint32_t& var_idx : poly.usedVariables()) {
+        vector<size_t>::iterator findIt = std::find(occur[var_idx].begin(), occur[var_idx].end(), index);
+        assert(findIt != occur[var_idx].end());
+        occur[var_idx].erase(findIt);
     }
 }
 
@@ -405,12 +392,8 @@ bool ANF::checkIfPolyUpdatesSomething(
         vector<uint32_t> ret = replacer->setValue(var, poly.hasConstantPart());
 
         //Mark updated vars
-        for(vector<uint32_t>::const_iterator
-            it = ret.begin(), end = ret.end()
-            ; it != end
-            ; it++
-        ) {
-            updatedVars.insert(*it);
+        for(const uint32_t& var_idx : ret) {
+            updatedVars.insert(var_idx);
         }
 
         return true;
@@ -433,12 +416,8 @@ bool ANF::checkIfPolyUpdatesSomething(
         vector<uint32_t> ret = replacer->setReplace(var1, Lit(var2, poly.hasConstantPart()));
         updatedVars.insert(var1);
         updatedVars.insert(var2);
-        for(vector<uint32_t>::const_iterator
-            it = ret.begin(), end = ret.end()
-            ; it != end
-            ; it++
-        ) {
-            updatedVars.insert(*it);
+        for(const uint32_t& var_idx : ret) {
+            updatedVars.insert(var_idx);
         }
 
         return true;
@@ -446,21 +425,13 @@ bool ANF::checkIfPolyUpdatesSomething(
 
     //Check for a*b*c*.. = 1  --> all vars must be TRUE
     if (realTermsSize == 1 && poly.hasConstantPart()) {
-        for(BooleMonomial::const_iterator
-            it = poly.firstTerm().begin(), end = poly.firstTerm().end()
-            ; it != end
-            ; it++
-        ) {
+        for(const uint32_t& var_idx : poly.firstTerm()) {
             //Make the update
-            vector<uint32_t> ret = replacer->setValue(*it, true);
+            vector<uint32_t> ret = replacer->setValue(var_idx, true);
 
             //Mark updated vars
-            for(vector<uint32_t>::const_iterator
-                it = ret.begin(), end = ret.end()
-                ; it != end
-                ; it++
-            ) {
-                updatedVars.insert(*it);
+            for(const uint32_t var_idx2 : ret) {
+                updatedVars.insert(var_idx2);
             }
         }
 
@@ -482,7 +453,6 @@ void ANF::simplify(const bool replace, bool all)
     }
     //Recursively update polynomials, while there is something to update
     while (!updatedVars.empty()) {
-
         //To track if an equation has already been updated in this round
         vector<char> eqsUpdated(eqs.size(), 0);
 
@@ -491,32 +461,21 @@ void ANF::simplify(const bool replace, bool all)
         set<uint32_t> oldUpdatedVars = updatedVars;
         updatedVars.clear();
 
-        for(set<uint32_t>::const_iterator
-            it = oldUpdatedVars.begin(), end = oldUpdatedVars.end()
-            ; it != end
-            ; it++
-        ) {
-            assert(occur.size() > *it);
+        for(const uint32_t& var_idx : oldUpdatedVars) {
+            assert(occur.size() > var_idx);
 
             //We will update the occur now, so make a backup first
-            const vector<size_t> backupOccur = occur[*it];
+            const vector<size_t> backupOccur = occur[var_idx];
 
             //Go through all polynomials that could be touched by
             //the value update of this variable
-            for(vector<size_t>::const_iterator
-                it2 = backupOccur.begin(), end2 = backupOccur.end()
-                ; it2 != end2
-                ; it2++
-            ) {
-                const size_t index = *it2;
-                assert(eqs.size() > index);
-
-                //This poly has already been updted in this round
-                if (eqsUpdated[index])
-                    continue;
-
-                eqsUpdated[index] = 1;
-                simplifyPolyonomial(eqs[index], index, replace);
+            for(const size_t& eq_idx : backupOccur) {
+                assert(eqs.size() > eq_idx);
+                if (!eqsUpdated[eq_idx]) {
+                    // This poly has not been updated in this round
+                    eqsUpdated[eq_idx] = 1;
+                    simplifyPolyonomial(eqs[eq_idx], eq_idx, replace);
+                }
             }
         }
     }
@@ -527,26 +486,16 @@ void ANF::simplify(const bool replace, bool all)
 
 void ANF::check_simplified_polys_contain_no_set_vars() const
 {
-    for(vector<BoolePolynomial>::const_iterator
-        it = eqs.begin(), end = eqs.end()
-        ; it != end
-        ; it++
-    ) {
-        const BoolePolynomial& eq = *it;
-        for(BooleMonomial::const_iterator
-            vit = eq.usedVariables().begin(), vend = eq.usedVariables().end()
-            ; vit != vend
-            ; vit++
-        ) {
-            const uint32_t var = *vit;
-            if (value(var) != l_Undef) {
+    for(const BoolePolynomial& poly : eqs) {
+        for(const uint32_t& var_idx : poly.usedVariables()) {
+            if (value(var_idx) != l_Undef) {
                 cout
                 << "ERROR: Variable "
-                << var
+                << var_idx
                 << " is inside equation "
-                << eq
+                << poly
                 << " even though its value is "
-                << value(var)
+                << value(var_idx)
                 << " !!" << endl;
 
                 exit(-1);
@@ -559,37 +508,27 @@ void ANF::removeEmptyEquations()
 {
     vector<BoolePolynomial> new_eqs;
     vector<size_t> occur_delta(eqs.size(), 0);
+    
     for(size_t i = 0; i < eqs.size(); i++) {
         const BoolePolynomial& eq = eqs[i];
-
-        //If equation is constant zero, don't add to new_eqs
-        //and update the occur_delta for all future equations
-        if (eq.isConstant() && !eq.isOne()) {
+        if (eq.isConstant() && eq.isZero()) {
+            //If equation is constant zero, don't add to new_eqs
+            //and update the occur_delta for all future equations
             for(size_t i2 = i; i2 < eqs.size(); i2++) {
                 occur_delta[i2]++;
             }
-            continue;
+        } else {
+            //Not constant zero, so add
+            new_eqs.push_back(eq);
         }
-
-        //Not constant zero, so add
-        new_eqs.push_back(eq);
     }
 
     //Go through each variable occurance
-    for(vector<vector<size_t> >::iterator
-        it = occur.begin(), end = occur.end()
-        ; it != end
-        ; it++
-    ) {
-
+    for(vector<size_t>& var_occur : occur) {
         //The indexes of the equations have changed. Update them.
-        for(vector<size_t>::iterator
-            it2 = it->begin(), end2 = it->end()
-            ; it2 != end2
-            ; it2++
-        ) {
-            assert(*it2 >= occur_delta[*it2]);
-            *it2 -= occur_delta[*it2];
+        for(size_t& eq_idx : var_occur) {
+            assert(eq_idx >= occur_delta[eq_idx]);
+            eq_idx -= occur_delta[eq_idx];
         }
     }
 
@@ -599,15 +538,15 @@ void ANF::removeEmptyEquations()
 bool ANF::evaluate(const vector<lbool>& vals) const
 {
     bool ret = true;
-    for(vector<BoolePolynomial>::const_iterator it = eqs.begin(), end = eqs.end(); it != end; it++) {
-        lbool lret = evaluatePoly(*it, vals);
+    for(const BoolePolynomial& poly : eqs) {
+        lbool lret = evaluatePoly(poly, vals);
         assert(lret != l_Undef);
 
         //OOps, grave bug in implmenetation
         if (lret != l_True) {
             cout
             << "Internal ERROR! Solution doesn't satisfy eq '"
-            << *it << "'"
+            << poly << "'"
             << endl;
             exit(-1);
         }
@@ -644,17 +583,9 @@ void ANF::printStats(int verbosity) const
 **/
 void ANF::checkOccur() const
 {
-    for(vector<vector<size_t> >::const_iterator
-        it = occur.begin(), end = occur.end()
-        ; it != end
-        ; it++
-    ) {
-        for(vector<size_t>::const_iterator
-            it2 = it->begin(), end2 = it->end()
-            ; it2 != end2
-            ; it2++
-        ) {
-            assert(*it2 < eqs.size());
+    for(const vector<size_t>& var_occur : occur) {
+        for(const size_t& eqn_idx : var_occur) {
+            assert(eqn_idx < eqs.size());
         }
     }
 
@@ -696,7 +627,7 @@ void ANF::extractVariables(
                 cout << "OOOOOOPS" << endl;
                 exit(-1);
             }
-            ret |= ((uint64_t)1) << (to-from-1)-at;
+            ret |= ((uint64_t)1) << ((to-from-1)-at);
             cout << "1";
             setAlready = true;
             continue;
@@ -755,37 +686,23 @@ ANF* ANF::minimise(
     BoolePolyRing* newring = new BoolePolyRing(unknown.size());
     ANF* newanf = new ANF(newring, config);
 
-    for(vector<BoolePolynomial>::const_iterator
-        it = eqs.begin(), end = eqs.end()
-        ; it != end
-        ; it++
-    ) {
+    // Update each polynomial in system
+    for(const BoolePolynomial& poly : eqs) {
         BoolePolynomial newpoly(*newring);
 
-        //Update poly
-        for(BoolePolynomial::const_iterator
-            it2 = it->begin(), end2 = it->end()
-            ; it2 != end2
-            ; it2++
-        ) {
+        // Update monomial in each polynomial
+        for(const BooleMonomial& mono : poly) {
             BooleMonomial newm(*newring);
 
-            const BooleMonomial& m = *it2;
-            for(BooleMonomial::const_iterator
-                it3 = m.begin(), end3 = m.end()
-                ; it3 != end3
-                ; it3++
-            ) {
-                uint32_t var = *it3;
-                assert(oldToNewMap.size() > var);
-                assert(oldToNewMap[var] != std::numeric_limits<uint32_t>::max());
-                uint32_t newVar = oldToNewMap[var];
+            // Update each variable in each monomial
+            for(const uint32_t& var_idx : mono) {
+                assert(oldToNewMap.size() > var_idx);
+                assert(oldToNewMap[var_idx] != std::numeric_limits<uint32_t>::max());
+                uint32_t newVar = oldToNewMap[var_idx];
                 newm *= BooleVariable(newVar, *newring);
             }
             newpoly += newm;
         }
-
-
         newanf->addBoolePolynomial(newpoly);
     }
 
