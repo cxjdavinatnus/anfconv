@@ -45,9 +45,9 @@ using std::endl;
 using std::string;
 using std::deque;
 
-vector<string> filesToRead;
 string fileToWriteANF;
 string fileToWriteCNF;
+string anf_input;
 string programName;
 
 //Writing options
@@ -77,7 +77,7 @@ void parseOptions(int argc, char *argv[])
     generalOptions.add_options()
     ("help,h", "produce help message")
     ("version", "print version number and exit")
-    ("read,r", po::value(&filesToRead)
+    ("read,r", po::value(&anf_input)
         , "Read ANF from this file")
     ("anfwrite,a", po::value(&fileToWriteANF)
         , "Write ANF output to file")
@@ -425,19 +425,12 @@ void solve_by_sat(const ANF* anf, const ANF& orig_anf)
     }
 }
 
-void perform_all_operations_for_file(
-    const string anf_filename
-    , BoolePolyRing* ring
-) {
+void perform_all_operations(const string anf_filename) {
+    const size_t ring_size = get_ringsize(anf_filename);
+    BoolePolyRing* ring = new BoolePolyRing(ring_size+1);
     ANF* anf = new ANF(ring, config);
-    const size_t ring_size2 = anf->readFile(anf_filename, true);
-
-    if (ring->nVariables() != ring_size2+1) {
-        cout << "ring->nVariables(): " << ring->nVariables()
-        << ", newly computed ring size: " << ring_size2 << endl;
-    }
-    assert(ring->nVariables() == ring_size2+1);
-
+    anf->readFile(anf_filename, true);
+    
     if (config.verbosity >= 1) {
         anf->printStats(config.verbosity);
     }
@@ -476,19 +469,10 @@ void perform_all_operations_for_file(
 int main(int argc, char *argv[])
 {
     parseOptions(argc, argv);
-    //test();
-
-    if (filesToRead.empty()) {
-        cerr << "ERROR: you must provide file(s) to read" << endl;
+    if (anf_input.length() == 0) {
+        cerr << "ERROR: you must provide an ANF input file" << endl;
     }
-
-    const size_t ring_size = get_ringsize(filesToRead[0]);
-    BoolePolyRing* ring = new BoolePolyRing(ring_size+1);
-
-    vector<vector<BoolePolynomial> > polys_for_file;
-    for(size_t i = 0; i < filesToRead.size(); i++) {
-        perform_all_operations_for_file(filesToRead[i], ring);
-    }
+    perform_all_operations(anf_input);
     cout << endl;
 
     return 0;
