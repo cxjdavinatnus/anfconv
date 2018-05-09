@@ -45,9 +45,9 @@ using std::endl;
 using std::string;
 using std::deque;
 
-string fileToWriteANF;
-string fileToWriteCNF;
 string anf_input;
+string anf_output;
+string cnf_output;
 string programName;
 
 //Writing options
@@ -79,9 +79,9 @@ void parseOptions(int argc, char *argv[])
     ("version", "print version number and exit")
     ("read,r", po::value(&anf_input)
         , "Read ANF from this file")
-    ("anfwrite,a", po::value(&fileToWriteANF)
+    ("anfwrite,a", po::value(&anf_output)
         , "Write ANF output to file")
-    ("cnfwrite,c", po::value(&fileToWriteCNF)
+    ("cnfwrite,c", po::value(&cnf_output)
         , "Write CNF output to file")
     ("solvesat,s", po::bool_switch(&doSolveSAT)
         , "Solve with SAT solver")
@@ -357,10 +357,10 @@ void simplify(ANF* anf, const ANF& orig_anf)
 void write_anf(ANF* anf)
 {
     std::ofstream ofs;
-    ofs.open(fileToWriteANF.c_str());
+    ofs.open(anf_output.c_str());
     if (!ofs) {
         std::cerr
-        << "Error opening file \"" << fileToWriteANF << "\" for writing"
+        << "Error opening file \"" << anf_output << "\" for writing"
         << endl;
         exit(-1);
     }
@@ -397,10 +397,10 @@ void solve_by_sat(const ANF* anf, const ANF& orig_anf)
 
     if (writeCNF) {
         std::ofstream ofs;
-        ofs.open(fileToWriteCNF.c_str());
+        ofs.open(cnf_output.c_str());
         if (!ofs) {
             cout << "Error opening file \""
-            << fileToWriteCNF
+            << cnf_output
             << "\" for writing" << endl;
             exit(-1);
         }
