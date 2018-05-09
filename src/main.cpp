@@ -292,7 +292,8 @@ void simplify(ANF* anf, const ANF& orig_anf)
     bool changed = true;
     uint32_t numIters = 0;
     double myTime = cpuTime();
-    while (true) {
+    while (changed) {
+        changed = false;
         uint64_t prev_set_vars = anf->getNumSetVars();
         uint64_t prev_eq_num = anf->size();
         uint64_t prev_monom_in_eq = anf->numMonoms();
@@ -316,23 +317,6 @@ void simplify(ANF* anf, const ANF& orig_anf)
             }
         }
 
-        uint64_t set_vars = anf->getNumSetVars();
-        uint64_t eq_num = anf->size();
-        uint64_t monom_in_eq = anf->numMonoms();
-        uint64_t deg = anf->deg();
-        uint64_t simp_xors = anf->getNumSimpleXors();
-        uint64_t replaced_vars = anf->getNumReplacedVars();
-
-        if (set_vars == prev_set_vars &&
-            eq_num == prev_eq_num &&
-            monom_in_eq == prev_monom_in_eq &&
-            deg == prev_deg &&
-            simp_xors == prev_simp_xors &&
-            replaced_vars == prev_replaced_vars
-        ) {
-            break;
-        }
-
         if (doSATSimplify) {
             cout << "c Simplifying using SAT solver" << endl;
             SimplifyBySat simpsat(*anf, orig_anf, config, numConfl);
@@ -351,6 +335,20 @@ void simplify(ANF* anf, const ANF& orig_anf)
             cout << "Done." << endl;
         }
         anf->propagate();
+
+        uint64_t set_vars = anf->getNumSetVars();
+        uint64_t eq_num = anf->size();
+        uint64_t monom_in_eq = anf->numMonoms();
+        uint64_t deg = anf->deg();
+        uint64_t simp_xors = anf->getNumSimpleXors();
+        uint64_t replaced_vars = anf->getNumReplacedVars();
+
+        changed |= (set_vars != prev_set_vars ||
+                    eq_num != prev_eq_num ||
+                    monom_in_eq != prev_monom_in_eq ||
+                    deg != prev_deg ||
+                    simp_xors != prev_simp_xors ||
+                    replaced_vars != prev_replaced_vars);
 
         numIters++;
     }
