@@ -296,185 +296,128 @@ void ANF::addBoolePolynomial(const BoolePolynomial& poly)
 {
     //If poly is constant, don't add it
     if (poly.isConstant()) {
-        if (poly.isOne())
+        if (poly.isOne()) {
             replacer->setNOTOK();
-
-        return;
-    }
-
-    //This will set 'updatedVars' and as such will allow the simplification
-    //routine to execute in simplify()
-    bool handled = checkIfPolyUpdatesSomething(poly, false);
-
-    //Not handled above by replacer, add as equation
-    if (!handled) {
+        }
+    } else {
         add_poly_to_occur(poly, eqs.size());
         eqs.push_back(poly);
     }
 }
 
-void ANF::add_poly_to_occur(const BoolePolynomial& poly, const size_t index)
+void ANF::add_poly_to_occur(const BoolePolynomial& poly, const size_t eq_idx)
 {
     BooleMonomial m = poly.usedVariables();
     for(const uint32_t& var_idx : m) {
-        occur[var_idx].push_back(index);
+        occur[var_idx].push_back(eq_idx);
     }
 }
 
-void ANF::remove_poly_from_occur(const BoolePolynomial& poly, size_t index)
+void ANF::remove_poly_from_occur(const BoolePolynomial& poly, size_t eq_idx)
 {
     //Remove from occur
     for(const uint32_t& var_idx : poly.usedVariables()) {
-        vector<size_t>::iterator findIt = std::find(occur[var_idx].begin(), occur[var_idx].end(), index);
+        vector<size_t>::iterator findIt = std::find(occur[var_idx].begin(), occur[var_idx].end(), eq_idx);
         assert(findIt != occur[var_idx].end());
         occur[var_idx].erase(findIt);
     }
 }
 
 //Simplify a single polynomial
-//-> remove from occurance list, update, then add to occurance list
-void ANF::simplifyPolyonomial(
-    BoolePolynomial& poly
-    , const size_t index
-    , const bool replace
-) {
+void ANF::simplifyPolyonomial(BoolePolynomial& poly, const size_t eq_idx) {
     //If poly is trivial, skip
     if (poly.isConstant()) {
-
         //Check UNSAT
-        if (poly.isOne())
+        if (poly.isOne()) {
             replacer->setNOTOK();
-
-        return;
-    }
-
-    remove_poly_from_occur(poly, index);
-
-    //update equation & representative
-    poly = replacer->update(poly);
-
-    bool handled = checkIfPolyUpdatesSomething(poly, replace);
-
-    if (!handled) {
-        add_poly_to_occur(poly, index);
+        }
     } else {
-        poly = BoolePolynomial(*ring);
-    }
-}
+        bool removePoly = false;
 
-bool ANF::checkIfPolyUpdatesSomething(
-    const BoolePolynomial& poly
-    , const bool replace
-) {
+        // If polynomial is "x + y = 0" or "x + y + 1 = 0", set the value of x in terms of y
+        if (poly.length() - (int)poly.hasConstantPart() == 2 && poly.deg() == 1) {
+            removePoly = true;
+            BooleMonomial m1 = poly.firstTerm(); // = poly.terms()[0]
+            BooleMonomial m2 = poly.terms()[1];
 
-    //check for emptyness
-    if (poly.isConstant()) {
+            assert(m1.deg() == 1);
+            assert(m2.deg() == 1);
+            uint32_t var1 = m1.firstVariable().index();
+            uint32_t var2 = m2.firstVariable().index();
 
-        //Empty AND UNSAT?
-        if (poly.hasConstantPart() == true) {
-            replacer->setNOTOK();
-        }
-
-        //Don't add, it's an empty poly
-        return true;
-    }
-
-    const size_t realTermsSize = poly.length() - (int)poly.hasConstantPart();
-
-    //check for var-setting
-    if (realTermsSize == 1 && poly.deg() == 1) {
-        const BooleMonomial m = poly.firstTerm();
-
-        assert(m.deg() == 1);
-        uint32_t var = m.firstVariable().index();
-
-        //make the update
-        vector<uint32_t> ret = replacer->setValue(var, poly.hasConstantPart());
-
-        //Mark updated vars
-        for(const uint32_t& var_idx : ret) {
-            updatedVars.insert(var_idx);
-        }
-
-        return true;
-    }
-
-    //check for equivalence
-    if (replace
-        && realTermsSize == 2
-        && poly.deg() == 1
-    ) {
-        BooleMonomial m1 = poly.firstTerm();
-        BooleMonomial m2 = poly.terms()[1];
-
-        assert(m1.deg() == 1);
-        assert(m2.deg() == 1);
-        uint32_t var1 = m1.firstVariable().index();
-        uint32_t var2 = m2.firstVariable().index();
-
-        //Make the update
-        vector<uint32_t> ret = replacer->setReplace(var1, Lit(var2, poly.hasConstantPart()));
-        updatedVars.insert(var1);
-        updatedVars.insert(var2);
-        for(const uint32_t& var_idx : ret) {
-            updatedVars.insert(var_idx);
-        }
-
-        return true;
-    }
-
-    //Check for a*b*c*.. = 1  --> all vars must be TRUE
-    if (realTermsSize == 1 && poly.hasConstantPart()) {
-        for(const uint32_t& var_idx : poly.firstTerm()) {
             //Make the update
-            vector<uint32_t> ret = replacer->setValue(var_idx, true);
+            vector<uint32_t> ret = replacer->setReplace(var1, Lit(var2, poly.hasConstantPart()));
+            updatedVars.insert(var1);
+            updatedVars.insert(var2);
 
-            //Mark updated vars
-            for(const uint32_t var_idx2 : ret) {
-                updatedVars.insert(var_idx2);
+            // Mark updated vars
+            for(const uint32_t& var_idx : ret) {
+                updatedVars.insert(var_idx);
             }
         }
 
-        return true;
-    }
+        // If polynomial is "a*b*c*.. + 1 = 0", then all variables must be TRUE
+        if (poly.length() == 2 && poly.hasConstantPart()) {
+            removePoly = true;
+            for(const uint32_t& var_idx : poly.firstTerm()) {
+                //Make the update
+                vector<uint32_t> ret = replacer->setValue(var_idx, true);
 
-    return false;
-}
+                //Mark updated vars
+                for(const uint32_t var_idx2 : ret) {
+                    updatedVars.insert(var_idx2);
+                }
+            }
+        }
 
-void ANF::simplify(const bool replace, bool all)
-{
-    if (all) {
-        for(size_t i = 0, end = ring->nVariables()
-            ; i < end
-            ; i++
-        ) {
-            updatedVars.insert(i);
+        if (removePoly) {
+            remove_poly_from_occur(poly, eq_idx);
+            poly = BoolePolynomial(*ring);
         }
     }
+}
+
+void ANF::propagate() {
     //Recursively update polynomials, while there is something to update
     while (!updatedVars.empty()) {
-        //To track if an equation has already been updated in this round
-        vector<char> eqsUpdated(eqs.size(), 0);
-
-        //Make a copy of what vars are updated
-        //we will clear and set the old structure
-        set<uint32_t> oldUpdatedVars = updatedVars;
+        // Make a copy of what variables to iterate through in this cycle
+        set<uint32_t> updatedVars_snapshot = updatedVars;
         updatedVars.clear();
-
-        for(const uint32_t& var_idx : oldUpdatedVars) {
+        for(const uint32_t& var_idx : updatedVars_snapshot) {
             assert(occur.size() > var_idx);
 
-            //We will update the occur now, so make a backup first
-            const vector<size_t> backupOccur = occur[var_idx];
-
-            //Go through all polynomials that could be touched by
-            //the value update of this variable
-            for(const size_t& eq_idx : backupOccur) {
+            // We will remove and add stuff to occur, so iterate over a snapshot
+            const vector<size_t> occur_snapshot = occur[var_idx];
+            for(const size_t& eq_idx : occur_snapshot) {
                 assert(eqs.size() > eq_idx);
-                if (!eqsUpdated[eq_idx]) {
-                    // This poly has not been updated in this round
-                    eqsUpdated[eq_idx] = 1;
-                    simplifyPolyonomial(eqs[eq_idx], eq_idx, replace);
+                BoolePolynomial& poly = eqs[eq_idx];
+
+                remove_poly_from_occur(poly, eq_idx);
+                poly = replacer->update(poly);
+
+                if (poly.isConstant()) {
+                    //Check UNSAT
+                    if (poly.isOne()) {
+                        replacer->setNOTOK();
+                        return;
+                    }
+                } else {
+                    // If polynomial is "x = 0" or "x + 1 = 0", set the value of x
+                    if (poly.length() - (int)poly.hasConstantPart() == 1 && poly.deg() == 1) {
+                        assert(var_idx == (uint32_t) poly.firstTerm().firstVariable().index());
+                        vector<uint32_t> ret = replacer->setValue(var_idx, poly.hasConstantPart());
+
+                        //Mark updated vars
+                        for(const uint32_t& updated_var : ret) {
+                            updatedVars.insert(updated_var);
+                        }
+
+                        // Zero out this polynomial
+                        poly = BoolePolynomial(*ring);
+                    } else {
+                        // Add back to occur
+                        add_poly_to_occur(poly, eq_idx);
+                    }
                 }
             }
         }
@@ -482,6 +425,19 @@ void ANF::simplify(const bool replace, bool all)
 
     removeEmptyEquations();
     check_simplified_polys_contain_no_set_vars();
+}
+
+void ANF::simplify()
+{
+    for (size_t i = 0; i < ring->nVariables(); i++) {
+        updatedVars.insert(i);
+    }
+    while (!updatedVars.empty()) {
+        for (size_t eq_idx = 0 ; eq_idx < eqs.size(); eq_idx++) {
+            simplifyPolyonomial(eqs[eq_idx], eq_idx);
+        }
+        propagate();
+    }
 }
 
 void ANF::check_simplified_polys_contain_no_set_vars() const
@@ -508,7 +464,7 @@ void ANF::removeEmptyEquations()
 {
     vector<BoolePolynomial> new_eqs;
     vector<size_t> occur_delta(eqs.size(), 0);
-    
+
     for(size_t i = 0; i < eqs.size(); i++) {
         const BoolePolynomial& eq = eqs[i];
         if (eq.isConstant() && eq.isZero()) {
@@ -598,7 +554,7 @@ void ANF::preferLowVars()
 {
     set<uint32_t> updatedVars2 = replacer->preferLowVars();
     updatedVars.insert(updatedVars2.begin(), updatedVars2.end());
-    simplify(true);
+    simplify();
 }
 
 void ANF::extractVariables(

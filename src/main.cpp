@@ -301,14 +301,13 @@ void simplify(ANF* anf, const ANF& orig_anf)
         uint64_t prev_replaced_vars = anf->getNumReplacedVars();
 
         if (doANFSimplify) {
-            anf->simplify(config.anfReplaceVars, true);
-            //anf->simplify(config.anfReplaceVars, true);
+            anf->simplify();
 
             if (config.verbosity>=1) {
                 cout
                 << "c Done." << endl;
                 if (config.verbosity >= 1) {
-                    cout<< "c Time to read&simplify ANF: "
+                    cout<< "c Time to implify ANF: "
                     << std::fixed << std::setprecision(2) << (cpuTime() - myTime)
                     << endl
                     << "New stats:" << endl;
@@ -341,6 +340,7 @@ void simplify(ANF* anf, const ANF& orig_anf)
             changed = true;
             cout << "c Done simplifying with SAT solver." << endl;
         }
+        anf->propagate();
 
         //XL simplification
         if (doXLSimplify) {
@@ -350,6 +350,8 @@ void simplify(ANF* anf, const ANF& orig_anf)
             changed |= xl.simplify(*anf, numIters, config);
             cout << "Done." << endl;
         }
+        anf->propagate();
+
         numIters++;
     }
 }
